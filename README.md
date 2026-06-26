@@ -127,10 +127,35 @@ Pairing (above) revolves around a 4-byte key (8 hex chars). The technical detail
   firmware then logs `Learned handshake key …` and **persists it to the ESP's flash (NVS)**, so
   later boots skip the wait. Setting the key to `00000000` does **not** enrol — it's treated as a
   (wrong) real key.
-- The NVS copy is wiped by a partition change or `esphome clean`, so keep the learned value in
-  `secrets.yaml` for a permanent record.
+- The learned key is kept in NVS flash and **survives OTA updates** (it is not cleared by
+  `esphome clean`, which only wipes the local build folder). To clear it deliberately, use the
+  forget endpoint below. Keep the learned value in `secrets.yaml` for a permanent record.
 - ⚠️ There is **no UI prompt** for any of this — watch the dashboard's Bluetooth status and/or the
   ESPHome logs (see Setup step 4).
+
+## Forgetting / re-pairing the toilet (de-pair)
+
+To make the bridge **forget its stored key and pair again from scratch** — e.g. moving it to a
+different toilet, or recovering from a wrong key — there is a hidden, REST-only endpoint. It is
+deliberately **not exposed to Home Assistant or the dashboard UI**, so it can't be triggered by
+accident:
+
+```bash
+curl -X POST -H "Content-Length: 0" \
+  "http://sensowash-bridge.local/button/Forget%20Pairing%20Key/press"
+```
+
+(The `-H "Content-Length: 0"` header is required — the board returns `411` without it. Use your
+board's IP instead of `sensowash-bridge.local` if mDNS isn't available.)
+
+This wipes the stored key from flash and reboots. On the next connect the bridge writes the
+`00000000` challenge and waits — **press the Bluetooth button on the toilet** to re-enroll, exactly
+like first-time pairing (see [Pair with the toilet](#4-pair-with-the-toilet) above). You'll see
+`Learned handshake key …` → `Persisted handshake key` → `Handshake complete` in the logs.
+
+> If you also have a `handshake_key` set in `secrets.yaml`/`config.yaml`, comment it out before
+> forgetting — otherwise the bridge will just re-apply the configured key on reboot instead of
+> enrolling.
 
 ## Entities
 
