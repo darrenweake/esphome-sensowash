@@ -1,6 +1,6 @@
 # sensowash_serial — ESPHome external component
 
-Controls a **Duravit SensoWash** (serial generation) shower-toilet over BLE from a cheap
+Controls a **Duravit SensoWash Starck F-Plus** (serial generation) shower-toilet over BLE from a cheap
 ESP32-S3 board, exposing it to Home Assistant as native ESPHome entities. 
 
 ## Hardware
