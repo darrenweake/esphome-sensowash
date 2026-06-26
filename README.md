@@ -8,6 +8,8 @@ ESP32-S3 board, exposing it to Home Assistant as native ESPHome entities.
 - Generic **ESP32-S3-DevKitC-1** (N8R2 or N16R8), USB-C
 - No GPIO wiring required.
 
+- I have used N16R8 so tweak the partition size if you use the 8MB variant.
+
 ## Install
 
 ### Option A — pull it into your own ESPHome config (recommended)
