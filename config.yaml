@@ -1,5 +1,5 @@
 substitutions:
-  build_version: "0.28"
+  build_version: "0.29"
   led_pin: GPIO48   # onboard addressable RGB LED (ESP32-S3-DevKitC-1 = GPIO48; some clones use GPIO38)
 
 esphome:
@@ -125,6 +125,14 @@ button:
   - platform: restart
     name: "Restart ESP Board"
     entity_category: config
+  # Hidden maintenance endpoint — NOT shown in Home Assistant or the dashboard UI (internal). Clears the
+  # stored pairing key from NVS and reboots so the bridge re-enrolls on next connect. Trigger via REST only:
+  #   curl -X POST "http://sensowash-bridge.local/button/Forget%20Pairing%20Key/press"
+  - platform: template
+    name: "Forget Pairing Key"
+    internal: true
+    on_press:
+      - lambda: 'id(sensowash)->forget_key();'
   # Manual BLE controls. Reconnect enables auto + connects; Disconnect disables auto + disconnects (stays off).
   # internal: the web dashboard's combined connect/disconnect widget drives these; HA uses the single
   # "Bluetooth" toggle (below) instead.

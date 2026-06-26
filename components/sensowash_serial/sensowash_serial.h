@@ -49,6 +49,10 @@ class SensowashSerial : public ble_client::BLEClientNode, public Component {
   // ---- config from codegen ----
   void set_handshake_key(uint8_t a, uint8_t b, uint8_t c, uint8_t d);
 
+  // Hidden maintenance action (exposed only via an internal/REST-only button): wipe the stored
+  // pairing key from NVS and reboot, so the bridge re-enrolls on next connect. Not in HA or the UI.
+  void forget_key();
+
   // ---- command API used by entity classes ----
   // Builds a framed command and pushes it onto the paced outbound queue.
   void enqueue_command(uint8_t opcode, const std::vector<uint8_t> &payload = {});

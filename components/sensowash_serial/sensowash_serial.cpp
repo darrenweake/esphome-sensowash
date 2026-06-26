@@ -7,6 +7,7 @@
 
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/application.h"  // App.safe_reboot() for forget_key()
 
 namespace esphome {
 namespace sensowash_serial {
@@ -69,16 +70,34 @@ void SensowashSerial::set_handshake_key(uint8_t a, uint8_t b, uint8_t c, uint8_t
   this->key_known_ = true;
 }
 
+void SensowashSerial::forget_key() {
+  // Write an all-0xFF sentinel (the erased-flash pattern; not a valid key) so the next boot enrolls
+  // afresh, then reboot. Reachable only via the internal REST-only "Forget Pairing Key" button.
+  std::array<uint8_t, 4> sentinel{0xFF, 0xFF, 0xFF, 0xFF};
+  this->pref_.save(&sentinel);
+  global_preferences->sync();
+  ESP_LOGW(TAG, "Pairing key cleared from NVS; rebooting to re-enroll on next connect");
+  delay(100);  // let the log line flush before the reboot
+  App.safe_reboot();
+}
+
 void SensowashSerial::setup() {
   // A stored (learned) key takes precedence over a configured default; both end up identical
   // for a given toilet, but a learned key proves the enrollment actually happened.
   this->pref_ = global_preferences->make_preference<std::array<uint8_t, 4>>(fnv1_hash("sensowash_serial_key"));
   std::array<uint8_t, 4> stored{};
   if (this->pref_.load(&stored)) {
-    std::memcpy(this->key_, stored.data(), 4);
-    this->key_known_ = true;
-    ESP_LOGI(TAG, "Loaded stored handshake key %02x%02x%02x%02x", this->key_[0], this->key_[1], this->key_[2],
-             this->key_[3]);
+    if (stored[0] == 0xFF && stored[1] == 0xFF && stored[2] == 0xFF && stored[3] == 0xFF) {
+      // Sentinel written by forget_key(): pairing was deliberately cleared -> enroll on next connect
+      // (this also overrides any configured handshake_key, matching "stored takes precedence").
+      this->key_known_ = false;
+      ESP_LOGI(TAG, "Stored handshake key was cleared; will enroll on next connect");
+    } else {
+      std::memcpy(this->key_, stored.data(), 4);
+      this->key_known_ = true;
+      ESP_LOGI(TAG, "Loaded stored handshake key %02x%02x%02x%02x", this->key_[0], this->key_[1], this->key_[2],
+               this->key_[3]);
+    }
   }
 
   // Wash params aren't reported by the toilet (the official app keeps them locally too), so persist

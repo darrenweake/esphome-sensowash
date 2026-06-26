@@ -19,7 +19,7 @@ ESPHome fetches it at compile time — no manual file copying:
 
 ```yaml
 external_components:
-  - source: github://darrenweake/esphome-sensowash@v0.28
+  - source: github://darrenweake/esphome-sensowash@v0.29
     components: [sensowash_serial, web_dashboard]
     refresh: never      # pin the tag for reproducible builds
 ```
