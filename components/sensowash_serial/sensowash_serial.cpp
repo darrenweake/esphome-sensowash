@@ -608,7 +608,7 @@ void SensowashSerial::dispatch_opcode_(uint8_t opcode, const std::vector<uint8_t
       this->publish_text_(this->software_version_tsensor_, payload);
       break;
     case OP_RESP_SERIAL:
-      // The serial response is BCD/hex digits (e.g. 21 59 57 06 48 12 = "215957064812"), not ASCII.
+      // The serial response is BCD/hex digits (e.g. 12 34 56 78 90 12 = "123456789012"), not ASCII.
       if (this->serial_number_tsensor_ != nullptr) {
         std::string s;
         char b[3];

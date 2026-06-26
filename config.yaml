@@ -1,5 +1,5 @@
 substitutions:
-  build_version: "0.29"
+  build_version: "1.0"
   led_pin: GPIO48   # onboard addressable RGB LED (ESP32-S3-DevKitC-1 = GPIO48; some clones use GPIO38)
 
 esphome:
@@ -172,6 +172,7 @@ switch:
       name: "Comfort Wash"
     holiday_mode:
       name: "Holiday Mode"
+      restore_mode: ALWAYS_OFF   # optimistic state — always boot OFF, never replay a stale 0x62 on reboot
   # Auto-reconnect policy. ON: ESPHome auto-connects/reconnects. OFF: stops auto-reconnect (stays disconnected).
   # internal: the dashboard shows this (greyed when disconnected); HA uses the single "Bluetooth" toggle below.
   - platform: template
