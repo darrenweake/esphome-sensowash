@@ -1,0 +1,251 @@
+substitutions:
+  build_version: "0.27"
+  led_pin: GPIO48   # onboard addressable RGB LED (ESP32-S3-DevKitC-1 = GPIO48; some clones use GPIO38)
+
+esphome:
+  name: sensowash-bridge
+  friendly_name: SensoWash Bridge
+  project:
+    name: "sensowash.bridge"
+    version: "${build_version}"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB   # N16R8 board is 16MB; default 4MB left ~12MB unpartitioned. Dual 7.75MB OTA slots.
+  framework:
+    type: esp-idf
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  fast_connect: true
+  power_save_mode: none   # avoid WiFi power-save interfering with BLE coexistence
+
+api:
+logger:
+  level: DEBUG
+  logs:
+    esp32_ble_tracker: INFO   # quiet per-advertisement spam
+    sensor: INFO
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# REST API + /events SSE stream that the custom dashboard drives.
+web_server:
+  version: 2
+  port: 80
+
+# Custom tablet-styled dashboard served at http://sensowash-bridge.local/
+web_dashboard:
+
+# Onboard addressable RGB LED, driven by the component as a Bluetooth status indicator.
+light:
+  - platform: esp32_rmt_led_strip
+    id: status_led
+    pin: ${led_pin}
+    num_leds: 1
+    chipset: WS2812
+    rgb_order: GRB
+    internal: true
+    restore_mode: ALWAYS_OFF
+    default_transition_length: 0s
+
+esp32_ble_tracker:
+
+ble_client:
+  - mac_address: !secret toilet_mac
+    id: sensowash_ble
+    # ESPHome's proven auto-connect/reconnect. The Auto switch toggles this at runtime.
+    auto_connect: true
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+# Sync the ESP clock so the toilet's time-request (0x2A) gets a real timestamp.
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: "Europe/London"   # board-local time drives the 0x2B time-reply sent to the toilet
+
+# Connection state. ble_auto mirrors the Auto switch (not persisted, so a reboot always tries to connect).
+globals:
+  - id: toilet_connected
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: toilet_connected_since
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+  - id: ble_auto
+    type: bool
+    restore_value: no
+    initial_value: 'true'
+
+sensowash_serial:
+  id: sensowash
+  ble_client_id: sensowash_ble
+  handshake_key: !secret handshake_key
+  status_led: status_led
+  on_connect:
+    - logger.log: "SensoWash connected"
+    - lambda: |-
+        id(toilet_connected) = true;
+        id(toilet_connected_since) = millis();
+  on_disconnect:
+    - logger.log: "SensoWash disconnected"
+    - lambda: 'id(toilet_connected) = false;'
+
+button:
+  - platform: sensowash_serial
+    sensowash_serial_id: sensowash
+    lid_toggle:
+      name: "Toilet Lid Toggle"
+    rear_wash:
+      name: "Rear Wash"
+    lady_wash:
+      name: "Lady Wash"
+    wash_stop:
+      name: "Stop Wash"
+    nozzle_self_clean:
+      name: "Nozzle Self-Clean"
+    nozzle_manual_clean:
+      name: "Nozzle Manual Clean"
+    holiday_mode:
+      name: "Holiday Mode (Drain Tank)"
+    descaling:
+      name: "⚠️ Start Descaling"
+  - platform: restart
+    name: "Restart ESP Board"
+    entity_category: diagnostic
+  # Manual BLE controls. Reconnect enables auto + connects; Disconnect disables auto + disconnects (stays off).
+  - platform: template
+    name: "Reconnect Bluetooth"
+    icon: "mdi:bluetooth-connect"
+    on_press:
+      - lambda: |-
+          id(ble_auto) = true;
+          id(sensowash_ble)->set_auto_connect(true);
+      - ble_client.connect:
+          id: sensowash_ble
+  - platform: template
+    name: "Disconnect Bluetooth"
+    icon: "mdi:bluetooth-off"
+    on_press:
+      - lambda: |-
+          id(ble_auto) = false;
+          id(sensowash_ble)->set_auto_connect(false);
+      - ble_client.disconnect:
+          id: sensowash_ble
+
+switch:
+  - platform: sensowash_serial
+    sensowash_serial_id: sensowash
+    auto_lid_open:
+      name: "Auto Lid Open"
+    auto_lid_close:
+      name: "Auto Lid Close"
+    beep:
+      name: "Feedback Tones"
+    energy_saving:
+      name: "Energy Saving"
+    comfort_wash:
+      name: "Comfort Wash"
+  # Auto-reconnect policy. ON: ESPHome auto-connects/reconnects. OFF: stops auto-reconnect (stays disconnected).
+  - platform: template
+    name: "Auto Bluetooth Reconnect"
+    icon: "mdi:bluetooth-transfer"
+    lambda: 'return id(ble_auto);'
+    turn_on_action:
+      - lambda: |-
+          id(ble_auto) = true;
+          id(sensowash_ble)->set_auto_connect(true);
+      - ble_client.connect:
+          id: sensowash_ble
+    turn_off_action:
+      - lambda: |-
+          id(ble_auto) = false;
+          id(sensowash_ble)->set_auto_connect(false);
+
+select:
+  - platform: sensowash_serial
+    sensowash_serial_id: sensowash
+    night_light:
+      name: "Night Light"
+    dryer:
+      name: "Dryer"
+    seat_temperature:
+      name: "Seat Temperature"
+    water_flow:
+      name: "Water Flow"
+    nozzle_position:
+      name: "Nozzle Position"
+    wash_water_temperature:
+      name: "Wash Water Temperature"
+
+sensor:
+  - platform: sensowash_serial
+    sensowash_serial_id: sensowash
+    descaling_remaining:
+      name: "Descaling Remaining"
+    ble_rssi:
+      name: "Toilet BLE Signal"
+  # WiFi signal strength of the ESP board (dBm).
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    id: wifi_rssi
+    update_interval: 10s
+  # How long the ESP board has been powered on (seconds).
+  - platform: uptime
+    name: "ESP Board Uptime"
+    id: board_uptime
+    update_interval: 5s
+  # How long the board has held the BLE link to the toilet (seconds; 0 when disconnected).
+  - platform: template
+    name: "Toilet Connected Time"
+    id: toilet_connected_time
+    unit_of_measurement: s
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: |-
+      if (id(toilet_connected))
+        return (millis() - id(toilet_connected_since)) / 1000.0f;
+      return 0.0f;
+
+text_sensor:
+  - platform: template
+    name: "Build Version"
+    id: build_version_ts
+    icon: "mdi:tag"
+    entity_category: diagnostic
+    lambda: 'return {"${build_version}"};'
+  - platform: sensowash_serial
+    sensowash_serial_id: sensowash
+    serial_number:
+      name: "Serial Number"
+    software_version:
+      name: "Software Version"
+    hardware_version:
+      name: "Hardware Version"
+    descaling_state:
+      name: "Descaling State"
+    fault_codes:
+      name: "Fault Codes"
+    pairing_status:
+      name: "Pairing Status"
+
+binary_sensor:
+  - platform: sensowash_serial
+    sensowash_serial_id: sensowash
+    seat_occupied:
+      name: "Seat Occupied"
+      device_class: occupancy
+  # True while the ESP32 holds the BLE link to the toilet.
+  - platform: template
+    name: "Toilet Connected"
+    id: toilet_connected_bs
+    device_class: connectivity
+    lambda: 'return id(toilet_connected);'
