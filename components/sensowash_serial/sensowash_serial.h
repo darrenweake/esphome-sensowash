@@ -64,6 +64,9 @@ class SensowashSerial : public ble_client::BLEClientNode, public Component {
   void set_wash_param(uint8_t kind, uint8_t index);  // 1=water flow, 2=nozzle position, 3=water temp
   void set_comfort_wash(bool state);
   void start_wash(uint8_t kind);  // 1=rear, 2=lady
+  // Holiday mode: ON sends the tank-drain command and records the state optimistically (the toilet
+  // never reports it back); auto-cleared on the next seat use. OFF just clears the local state.
+  void set_holiday_mode(bool state);
 
   // ---- entity registration (set from codegen) ----
   void set_seat_occupied_binary_sensor(binary_sensor::BinarySensor *s) { this->seat_occupied_bsensor_ = s; }
@@ -83,6 +86,7 @@ class SensowashSerial : public ble_client::BLEClientNode, public Component {
   void set_dryer_select(select::Select *s) { this->dryer_select_ = s; }
   void set_seat_temperature_select(select::Select *s) { this->seat_temperature_select_ = s; }
   void set_comfort_wash_switch(switch_::Switch *s) { this->comfort_wash_switch_ = s; }
+  void set_holiday_switch(switch_::Switch *s) { this->holiday_switch_ = s; }
   void set_water_flow_select(select::Select *s) { this->water_flow_select_ = s; }
   void set_nozzle_position_select(select::Select *s) { this->nozzle_position_select_ = s; }
   void set_wash_water_temp_select(select::Select *s) { this->wash_water_temp_select_ = s; }
@@ -163,6 +167,10 @@ class SensowashSerial : public ble_client::BLEClientNode, public Component {
   uint8_t wash_water_temp_index_{2};  // 0..3
   bool comfort_wash_{false};
 
+  // ---- holiday mode (optimistic; toilet doesn't report it back) ----
+  bool holiday_active_{false};
+  bool last_seat_occupied_{false};  // rising-edge detect to auto-exit holiday on seat use
+
   // ---- periodic seat-state poll (toilet doesn't push occupancy) ----
   static const uint32_t SEAT_POLL_INTERVAL_MS = 30000;
   uint32_t last_seat_poll_ms_{0};
@@ -197,6 +205,7 @@ class SensowashSerial : public ble_client::BLEClientNode, public Component {
   select::Select *dryer_select_{nullptr};
   select::Select *seat_temperature_select_{nullptr};
   switch_::Switch *comfort_wash_switch_{nullptr};
+  switch_::Switch *holiday_switch_{nullptr};
   select::Select *water_flow_select_{nullptr};
   select::Select *nozzle_position_select_{nullptr};
   select::Select *wash_water_temp_select_{nullptr};
@@ -208,6 +217,7 @@ class SensowashSerial : public ble_client::BLEClientNode, public Component {
   bool descale_needed_{false};      // toilet reports "Descaling required" -> amber LED
   bool led_on_{false};              // last applied LED on/off (so we only re-write on change)
   uint8_t led_r_{0}, led_g_{0}, led_b_{0};
+  float led_bright_{1.0f};           // last applied LED brightness (0..1)
   static const uint32_t LED_TX_FLASH_MS = 80;
   static const uint32_t LED_FAULT_BLINK_MS = 400;
 

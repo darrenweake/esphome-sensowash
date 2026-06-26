@@ -17,6 +17,7 @@ class SensowashSwitch : public switch_::Switch, public Parented<SensowashSerial>
   void set_opcode(uint8_t opcode) { this->opcode_ = opcode; }
   void set_energy_saving(bool v) { this->energy_saving_ = v; }
   void set_comfort(bool v) { this->comfort_ = v; }
+  void set_holiday(bool v) { this->holiday_ = v; }
 
  protected:
   void write_state(bool state) override {
@@ -29,6 +30,11 @@ class SensowashSwitch : public switch_::Switch, public Parented<SensowashSerial>
       this->publish_state(state);
       return;
     }
+    if (this->holiday_) {
+      // Parent owns the optimistic state + publishes it (so auto-exit can clear the same switch).
+      this->parent_->set_holiday_mode(state);
+      return;
+    }
     this->parent_->enqueue_command(this->opcode_, {(uint8_t) (state ? 0x01 : 0x00)});
     this->publish_state(state);
   }
@@ -36,6 +42,7 @@ class SensowashSwitch : public switch_::Switch, public Parented<SensowashSerial>
   uint8_t opcode_{0};
   bool energy_saving_{false};
   bool comfort_{false};
+  bool holiday_{false};
 };
 
 }  // namespace sensowash_serial

@@ -18,6 +18,7 @@ SWITCHES = {
 }
 
 CONF_COMFORT_WASH = "comfort_wash"
+CONF_HOLIDAY_MODE = "holiday_mode"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -31,6 +32,9 @@ CONFIG_SCHEMA = cv.Schema(
         },
         # Comfort (oscillating) wash is a runtime control, not a config switch.
         cv.Optional(CONF_COMFORT_WASH): switch.switch_schema(SensowashSwitch),
+        # Holiday mode: ON drains the tank and is tracked optimistically (the toilet never reports
+        # it back); auto-exits on next seat use. A runtime control, not a config switch.
+        cv.Optional(CONF_HOLIDAY_MODE): switch.switch_schema(SensowashSwitch),
     }
 )
 
@@ -52,3 +56,9 @@ async def to_code(config):
         await cg.register_parented(sw, parent)
         cg.add(sw.set_comfort(True))
         cg.add(parent.set_comfort_wash_switch(sw))  # so func-config readback can reflect it
+
+    if CONF_HOLIDAY_MODE in config:
+        sw = await switch.new_switch(config[CONF_HOLIDAY_MODE])
+        await cg.register_parented(sw, parent)
+        cg.add(sw.set_holiday(True))
+        cg.add(parent.set_holiday_switch(sw))  # so auto-exit can clear it

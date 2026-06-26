@@ -1,5 +1,5 @@
 substitutions:
-  build_version: "0.27"
+  build_version: "0.28"
   led_pin: GPIO48   # onboard addressable RGB LED (ESP32-S3-DevKitC-1 = GPIO48; some clones use GPIO38)
 
 esphome:
@@ -31,10 +31,13 @@ ota:
   - platform: esphome
     password: !secret ota_password
 
-# REST API + /events SSE stream that the custom dashboard drives.
+# REST API + /events SSE stream that the custom dashboard drives. include_internal exposes
+# entities marked `internal: true` (helper/raw entities) to the dashboard while keeping them
+# out of Home Assistant — so HA shows clean entities and the dashboard keeps its richer controls.
 web_server:
   version: 2
   port: 80
+  include_internal: true
 
 # Custom tablet-styled dashboard served at http://sensowash-bridge.local/
 web_dashboard:
@@ -88,7 +91,10 @@ globals:
 sensowash_serial:
   id: sensowash
   ble_client_id: sensowash_ble
-  handshake_key: !secret handshake_key
+  # No key by default — the bridge enrolls on first connect: press the Bluetooth button on the toilet
+  # and it discloses its key, which is then saved to flash. If you already know your toilet's key, add
+  # it to secrets.yaml and uncomment the line below. See the README "Pairing" section.
+  # handshake_key: !secret handshake_key
   status_led: status_led
   on_connect:
     - logger.log: "SensoWash connected"
@@ -114,17 +120,18 @@ button:
       name: "Nozzle Self-Clean"
     nozzle_manual_clean:
       name: "Nozzle Manual Clean"
-    holiday_mode:
-      name: "Holiday Mode (Drain Tank)"
     descaling:
       name: "⚠️ Start Descaling"
   - platform: restart
     name: "Restart ESP Board"
-    entity_category: diagnostic
+    entity_category: config
   # Manual BLE controls. Reconnect enables auto + connects; Disconnect disables auto + disconnects (stays off).
+  # internal: the web dashboard's combined connect/disconnect widget drives these; HA uses the single
+  # "Bluetooth" toggle (below) instead.
   - platform: template
     name: "Reconnect Bluetooth"
     icon: "mdi:bluetooth-connect"
+    internal: true
     on_press:
       - lambda: |-
           id(ble_auto) = true;
@@ -134,6 +141,7 @@ button:
   - platform: template
     name: "Disconnect Bluetooth"
     icon: "mdi:bluetooth-off"
+    internal: true
     on_press:
       - lambda: |-
           id(ble_auto) = false;
@@ -154,10 +162,14 @@ switch:
       name: "Energy Saving"
     comfort_wash:
       name: "Comfort Wash"
+    holiday_mode:
+      name: "Holiday Mode"
   # Auto-reconnect policy. ON: ESPHome auto-connects/reconnects. OFF: stops auto-reconnect (stays disconnected).
+  # internal: the dashboard shows this (greyed when disconnected); HA uses the single "Bluetooth" toggle below.
   - platform: template
     name: "Auto Bluetooth Reconnect"
     icon: "mdi:bluetooth-transfer"
+    internal: true
     lambda: 'return id(ble_auto);'
     turn_on_action:
       - lambda: |-
@@ -169,6 +181,23 @@ switch:
       - lambda: |-
           id(ble_auto) = false;
           id(sensowash_ble)->set_auto_connect(false);
+  # Home Assistant's single Bluetooth toggle: ON = connect (+ auto-reconnect), OFF = disconnect (stay off).
+  - platform: template
+    name: "Bluetooth"
+    icon: "mdi:bluetooth"
+    lambda: 'return id(ble_auto);'
+    turn_on_action:
+      - lambda: |-
+          id(ble_auto) = true;
+          id(sensowash_ble)->set_auto_connect(true);
+      - ble_client.connect:
+          id: sensowash_ble
+    turn_off_action:
+      - lambda: |-
+          id(ble_auto) = false;
+          id(sensowash_ble)->set_auto_connect(false);
+      - ble_client.disconnect:
+          id: sensowash_ble
 
 select:
   - platform: sensowash_serial
@@ -198,15 +227,19 @@ sensor:
     name: "WiFi Signal"
     id: wifi_rssi
     update_interval: 10s
-  # How long the ESP board has been powered on (seconds).
+  # How long the ESP board has been powered on (seconds). internal: feeds the dashboard's live
+  # ticker; HA shows the human-readable "ESP Board Uptime" text sensor instead.
   - platform: uptime
     name: "ESP Board Uptime"
     id: board_uptime
+    internal: true
     update_interval: 5s
-  # How long the board has held the BLE link to the toilet (seconds; 0 when disconnected).
+  # How long the board has held the BLE link to the toilet (seconds; 0 when disconnected). internal:
+  # feeds the dashboard ticker; HA shows the "Toilet Connected Time" text sensor instead.
   - platform: template
     name: "Toilet Connected Time"
     id: toilet_connected_time
+    internal: true
     unit_of_measurement: s
     accuracy_decimals: 0
     update_interval: 5s
@@ -222,6 +255,40 @@ text_sensor:
     icon: "mdi:tag"
     entity_category: diagnostic
     lambda: 'return {"${build_version}"};'
+  # Human-readable board uptime (days/hours/minutes) for Home Assistant. The numeric seconds value
+  # lives in the internal "ESP Board Uptime" sensor (dashboard ticker).
+  - platform: template
+    name: "ESP Uptime"
+    icon: "mdi:timer-outline"
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: |-
+      float f = id(board_uptime).state;
+      if (isnan(f)) return std::string("—");
+      uint32_t s = (uint32_t) f, d = s / 86400; s %= 86400;
+      uint32_t h = s / 3600; s %= 3600; uint32_t m = s / 60;
+      char buf[40];
+      if (d) snprintf(buf, sizeof(buf), "%ud %uh %um", (unsigned) d, (unsigned) h, (unsigned) m);
+      else if (h) snprintf(buf, sizeof(buf), "%uh %um", (unsigned) h, (unsigned) m);
+      else snprintf(buf, sizeof(buf), "%um", (unsigned) m);
+      return std::string(buf);
+  # Human-readable BLE link duration (days/hours/minutes) for Home Assistant; Diagnostic section.
+  - platform: template
+    name: "Toilet Connected Duration"
+    icon: "mdi:timer-outline"
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: |-
+      if (!id(toilet_connected)) return std::string("Not connected");
+      float f = id(toilet_connected_time).state;
+      if (isnan(f)) return std::string("—");
+      uint32_t s = (uint32_t) f, d = s / 86400; s %= 86400;
+      uint32_t h = s / 3600; s %= 3600; uint32_t m = s / 60;
+      char buf[40];
+      if (d) snprintf(buf, sizeof(buf), "%ud %uh %um", (unsigned) d, (unsigned) h, (unsigned) m);
+      else if (h) snprintf(buf, sizeof(buf), "%uh %um", (unsigned) h, (unsigned) m);
+      else snprintf(buf, sizeof(buf), "%um", (unsigned) m);
+      return std::string(buf);
   - platform: sensowash_serial
     sensowash_serial_id: sensowash
     serial_number:
@@ -236,6 +303,7 @@ text_sensor:
       name: "Fault Codes"
     pairing_status:
       name: "Pairing Status"
+      entity_category: config
 
 binary_sensor:
   - platform: sensowash_serial

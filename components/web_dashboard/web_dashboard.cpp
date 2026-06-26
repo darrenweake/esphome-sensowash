@@ -262,7 +262,7 @@ var LAYOUT = [
   {title:"Maintenance", items:[
     {type:"button", name:"Nozzle Self-Clean", label:"Start", icon:IC.self},
     {type:"button", name:"Nozzle Manual Clean", label:"Start", icon:IC.brush},
-    {type:"button", name:"Holiday Mode (Drain Tank)", label:"Start", icon:IC.holiday,
+    {type:"holiday", name:"Holiday Mode", display:"Holiday Mode (Drain Tank)", label:"Start", icon:IC.holiday,
       confirm:"Drain the internal tank for holiday mode?"},
     {type:"button", name:"⚠️ Start Descaling", display:"Start Descaling", label:"Start", icon:IC.clean,
       confirm:"Start descaling?\nThis needs descaling tablets in place and runs a long cycle."}
@@ -408,6 +408,32 @@ function buildButton(item){
   return b;
 }
 
+// Holiday tile: looks like an action button but is bound to the "Holiday Mode" switch so it reflects
+// state. Off: press (with confirm) turns the switch on. On: highlighted + relabelled "Holiday Mode
+// Active", and pressing turns it back off. The switch also auto-clears on next seat use.
+function buildHolidayBtn(item){
+  var b=el("button","act");
+  var lead=el("span","lead");
+  if(item.icon) lead.appendChild(svgIcon(item.icon));
+  var txt=el("span",null,item.display||item.name); lead.appendChild(txt);
+  b.appendChild(lead);
+  var pill=el("span","go",item.label||"Start"); b.appendChild(pill);
+  var active=false;
+  b.onclick=function(){
+    if(active){ post(url("switch",item.name,"/turn_off")); return; }
+    var fire=function(){ post(url("switch",item.name,"/turn_on")); };
+    if(item.confirm) ask(item.display||item.name,item.confirm,false,fire); else fire();
+  };
+  reg(item.name).update=function(d){
+    active=(d.value===true)||(d.state==="ON");
+    b.style.background=active?"rgba(70,150,255,.28)":"";
+    b.style.borderColor=active?"rgba(90,160,255,.85)":"";
+    txt.textContent=active?"Holiday Mode Active":(item.display||item.name);
+    pill.textContent=active?"Exit":(item.label||"Start");
+  };
+  return b;
+}
+
 // Energy-saving day calendar: a 24h timeline with the seat-heating-on (warm) windows highlighted,
 // eco (heating off) elsewhere, plus a live "now" marker. Windows mirror the firmware preset.
 var WARM_WINDOWS=[[6,9],[19,22]];   // hours the seat heating is ON
@@ -493,6 +519,7 @@ LAYOUT.forEach(function(card){
     if(it.type==="switch") c.appendChild(buildSwitch(it));
     else if(it.type==="select") c.appendChild(buildSelect(it));
     else if(it.type==="button") c.appendChild(buildButton(it));
+    else if(it.type==="holiday") c.appendChild(buildHolidayBtn(it));
     else if(it.type==="bleconn") c.appendChild(buildBleConn());
     else if(it.type==="note") c.appendChild(buildNote(it));
     else if(it.type==="schedule") c.appendChild(buildDaybar());

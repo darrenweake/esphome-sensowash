@@ -30,7 +30,7 @@ ota:
 
 # Pull the component from GitHub. Pin to a release tag for reproducible builds.
 external_components:
-  - source: github://darrenweake/esphome-sensowash@v0.27
+  - source: github://darrenweake/esphome-sensowash@v0.28
     components: [sensowash_serial]
     refresh: never
 

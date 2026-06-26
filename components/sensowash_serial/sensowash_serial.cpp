@@ -287,6 +287,21 @@ void SensowashSerial::start_wash(uint8_t kind) {
   this->pending_poll_ms_ = millis() + POST_CMD_POLL_DELAY_MS;
 }
 
+void SensowashSerial::set_holiday_mode(bool state) {
+  if (state) {
+    // 0x62 [01] = enter holiday mode / drain the internal tank (EN1717). The toilet never reports
+    // this state back, so we track it optimistically and clear it on the next seat use.
+    this->enqueue_command(0x62, {0x01});
+    this->holiday_active_ = true;
+    ESP_LOGI(TAG, "Holiday mode ON (tank drain requested)");
+  } else {
+    this->holiday_active_ = false;
+    ESP_LOGI(TAG, "Holiday mode OFF");
+  }
+  if (this->holiday_switch_ != nullptr)
+    this->holiday_switch_->publish_state(state);
+}
+
 // ---------------------------------------------------------------------------
 // BLE plumbing
 // ---------------------------------------------------------------------------
@@ -497,6 +512,9 @@ void SensowashSerial::reset_connection_() {
   this->pending_poll_ms_ = 0;
   this->fault_active_ = false;
   this->descale_needed_ = false;
+  // Clear the toilet BLE signal so HA doesn't keep showing a stale value while disconnected.
+  if (this->ble_rssi_sensor_ != nullptr)
+    this->ble_rssi_sensor_->publish_state(NAN);
   if (was_connected) {
     ESP_LOGI(TAG, "Disconnected");
     for (auto *t : this->on_disconnect_triggers_)
@@ -684,6 +702,15 @@ void SensowashSerial::parse_toilet_state_(const std::vector<uint8_t> &p) {
   if (this->seat_occupied_bsensor_ != nullptr)
     this->seat_occupied_bsensor_->publish_state(occupied);
 
+  // Holiday mode auto-exits when the toilet is next used: a rising edge on seat occupancy clears it.
+  if (occupied && !this->last_seat_occupied_ && this->holiday_active_) {
+    ESP_LOGI(TAG, "Seat used -> exiting Holiday mode");
+    this->holiday_active_ = false;
+    if (this->holiday_switch_ != nullptr)
+      this->holiday_switch_->publish_state(false);
+  }
+  this->last_seat_occupied_ = occupied;
+
   if (this->dryer_select_ != nullptr) {
     uint8_t idx;
     if (drying) {
@@ -787,6 +814,7 @@ void SensowashSerial::update_led_() {
     return;
   bool on = false;
   uint8_t r = 0, g = 0, b = 0;
+  float bright = 1.0f;
   if (this->handshake_state_ == HandshakeState::READY) {
     if (this->fault_active_) {
       if ((millis() / LED_FAULT_BLINK_MS) % 2 == 0) { on = true; r = 255; }  // red
@@ -796,17 +824,18 @@ void SensowashSerial::update_led_() {
     } else if (this->descale_needed_) {
       on = true; r = 255; g = 140; b = 0;  // descaling required: amber
     } else {
-      on = true; b = 22;  // connected, idle: very dim blue glow (~9% of full)
+      on = true; b = 255; bright = 0.2f;  // connected, idle: blue at 20% brightness
     }
   }
-  if (on == this->led_on_ && r == this->led_r_ && g == this->led_g_ && b == this->led_b_)
+  if (on == this->led_on_ && r == this->led_r_ && g == this->led_g_ && b == this->led_b_ &&
+      bright == this->led_bright_)
     return;  // unchanged — don't re-write the LED every loop
-  this->led_on_ = on; this->led_r_ = r; this->led_g_ = g; this->led_b_ = b;
+  this->led_on_ = on; this->led_r_ = r; this->led_g_ = g; this->led_b_ = b; this->led_bright_ = bright;
   auto call = this->status_led_->make_call();
   call.set_transition_length(0);
   if (on) {
     call.set_state(true);
-    call.set_brightness(1.0f);
+    call.set_brightness(bright);
     call.set_rgb(r / 255.0f, g / 255.0f, b / 255.0f);
   } else {
     call.set_state(false);

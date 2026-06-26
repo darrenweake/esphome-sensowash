@@ -15,7 +15,7 @@ BUTTONS = {
     "wash_stop": (0x01, [], False),
     "nozzle_self_clean": (0x60, [], True),
     "nozzle_manual_clean": (0x61, [], True),
-    "holiday_mode": (0x62, [0x01], True),
+    # holiday_mode (0x62 [01]) is now a stateful switch on the switch platform.
     "tank_drain_en1717": (0x62, [0x00], True),
     "descaling": (0x63, [], True),
 }
